@@ -342,11 +342,7 @@ class RustJSPrincipal : public JSPrincipals
     RustJSPrincipal(const void* origin, 
                      void (*destroy)(JSPrincipals *principal),
                      bool (*write)(JSContext* cx, JSStructuredCloneWriter* writer))
-    : JSPrincipals() {
-      this->origin = origin;
-      this->destroyCallback = destroy;
-      this->writeCallback = write;
-    }
+    : JSPrincipals(), origin(origin), destroyCallback(destroy), writeCallback(write) {}
 
     virtual const void* getOrigin() {
       return origin;
@@ -361,6 +357,70 @@ class RustJSPrincipal : public JSPrincipals
       return this->writeCallback
              ? this->writeCallback(cx, writer)
              : false;
+    }
+};
+
+class CrossOriginWrapper: public js::CrossCompartmentSecurityWrapper {
+    ProxyTraps mTraps;
+
+  public:
+    CrossOriginWrapper(const ProxyTraps& traps)
+    : js::SecurityWrapper<js::CrossCompartmentWrapper>(0), mTraps(traps) {
+    }
+
+    //TODO should probably defer to an opaque wrapper
+    DEFER_TO_TRAP_OR_BASE_CLASS(js::SecurityWrapper<js::CrossCompartmentWrapper>)
+
+    virtual bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
+                                       JS::HandleId id,
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override
+    {
+        return mTraps.getPropertyDescriptor
+               ? mTraps.getOwnPropertyDescriptor(cx, proxy, id, desc)
+               : js::CrossCompartmentSecurityWrapper::getOwnPropertyDescriptor(cx, proxy, id, desc);
+    }
+
+    virtual bool getPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
+                                       JS::HandleId id,
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override
+    {
+        return mTraps.getPropertyDescriptor
+               ? mTraps.getPropertyDescriptor(cx, proxy, id, desc)
+               : js::CrossCompartmentSecurityWrapper::getPropertyDescriptor(cx, proxy, id, desc);
+    }
+
+    virtual bool defineProperty(JSContext *cx,
+                                JS::HandleObject proxy, JS::HandleId id,
+                                JS::Handle<JS::PropertyDescriptor> desc,
+                                JS::ObjectOpResult &result) const override
+    {
+        return mTraps.defineProperty
+               ? mTraps.defineProperty(cx, proxy, id, desc, result)
+               : js::CrossCompartmentSecurityWrapper::defineProperty(cx, proxy, id, desc, result);
+    }
+
+    virtual bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
+                         JS::ObjectOpResult &result) const override
+    {
+        return mTraps.delete_
+               ? mTraps.delete_(cx, proxy, id, result)
+               : js::CrossCompartmentSecurityWrapper::delete_(cx, proxy, id, result);
+    }
+
+    virtual bool preventExtensions(JSContext *cx, JS::HandleObject proxy,
+                                   JS::ObjectOpResult &result) const override
+    {
+        return mTraps.preventExtensions
+               ? mTraps.preventExtensions(cx, proxy, result)
+               : js::CrossCompartmentSecurityWrapper::preventExtensions(cx, proxy, result);
+    }
+
+    virtual bool isExtensible(JSContext *cx, JS::HandleObject proxy,
+                              bool *succeeded) const override
+    {
+        return mTraps.isExtensible
+               ? mTraps.isExtensible(cx, proxy, succeeded)
+               : js::CrossCompartmentSecurityWrapper::isExtensible(cx, proxy, succeeded);
     }
 };
 
@@ -538,6 +598,12 @@ const void*
 GetSecurityWrapper()
 {
   return &js::CrossCompartmentSecurityWrapper::singleton;
+}
+
+const void*
+CreateCrossOriginWrapper(const ProxyTraps* aTraps)
+{
+  return new CrossOriginWrapper(*aTraps);
 }
 
 JS::ReadOnlyCompileOptions*
