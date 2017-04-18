@@ -332,14 +332,14 @@ class WrapperProxyHandler : public js::Wrapper
     }
 };
 
-class ServoJSPrincipal : public JSPrincipals
+class RustJSPrincipal : public JSPrincipals
 {
     const void* origin; //box with origin in it
     void (*destroyCallback)(JSPrincipals *principal);
     bool (*writeCallback)(JSContext* cx, JSStructuredCloneWriter* writer);
 
   public:
-    ServoJSPrincipal(const void* origin, 
+    RustJSPrincipal(const void* origin, 
                      void (*destroy)(JSPrincipals *principal),
                      bool (*write)(JSContext* cx, JSStructuredCloneWriter* writer))
     : JSPrincipals() {
@@ -440,15 +440,15 @@ class ForwardingProxyHandler : public js::BaseProxyHandler
 extern "C" {
 
 JSPrincipals*
-CreateServoJSPrincipal(const void* origin,
+CreateRustJSPrincipal(const void* origin,
                        void (*destroy)(JSPrincipals *principal),
                        bool (*write)(JSContext* cx, JSStructuredCloneWriter *writer)){
-  return new ServoJSPrincipal(origin, destroy, write);
+  return new RustJSPrincipal(origin, destroy, write);
 }
 
 const void*
 GetPrincipalOrigin(JSPrincipals* principal) {
-  return static_cast<ServoJSPrincipal*>(principal)->getOrigin();
+  return static_cast<RustJSPrincipal*>(principal)->getOrigin();
 }
 
 bool
