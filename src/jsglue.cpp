@@ -365,11 +365,11 @@ class CrossOriginWrapper: public js::CrossCompartmentSecurityWrapper {
 
   public:
     CrossOriginWrapper(const ProxyTraps& traps)
-    : js::SecurityWrapper<js::CrossCompartmentWrapper>(0), mTraps(traps) {
+    : js::CrossCompartmentSecurityWrapper(0), mTraps(traps) {
     }
 
     //TODO should probably defer to an opaque wrapper
-    DEFER_TO_TRAP_OR_BASE_CLASS(js::SecurityWrapper<js::CrossCompartmentWrapper>)
+    DEFER_TO_TRAP_OR_BASE_CLASS(js::CrossCompartmentSecurityWrapper)
 
     virtual bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
                                        JS::HandleId id,

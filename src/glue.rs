@@ -164,6 +164,14 @@ impl ::std::default::Default for WrapperProxyHandler {
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
+pub struct CrossOriginWrapper {
+    pub mTraps: ProxyTraps,
+}
+impl ::std::default::Default for CrossOriginWrapper {
+    fn default() -> CrossOriginWrapper { unsafe { ::std::mem::zeroed() } }
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
 pub struct ForwardingProxyHandler {
     pub mTraps: ProxyTraps,
     pub mExtra: *const ::libc::c_void,
@@ -205,7 +213,7 @@ extern "C" {
     pub fn CreateCrossOriginWrapper(aTraps: *const ProxyTraps)
      -> *const ::libc::c_void;
     pub fn CreateRustJSPrincipal(origin: *const ::libc::c_void,
-                                  destroy: Option<unsafe extern "C" fn
+                                  destroy: Option<unsafe fn
                                                   (principal: *mut JSPrincipals)>,
                                   write: Option<unsafe extern "C" fn
                                                 (cx: *mut JSContext,
