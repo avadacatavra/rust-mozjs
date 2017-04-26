@@ -360,10 +360,10 @@ class RustJSPrincipal : public JSPrincipals
     }
 };
 
-class OpaqueWrapper {
+class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
 
   public:
-    OpaqueWrapper(){}
+    OpaqueWrapper(): js::CrossCompartmentSecurityWrapper(0) {}
 
      bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
                                        JS::HandleId id,
@@ -429,18 +429,12 @@ class OpaqueWrapper {
 
 };
 
-class CrossOriginWrapper {
+class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
   //JS::HandleObject xow_obj;
   //TODO store the object?
 
   public:
-    //CrossOriginWrapper(const JS::HandleObject& obj) { xow_obj = obj ;}
-     //{ xow_obj(obj) }
-     //A(int x_) { x = x_; }
-     CrossOriginWrapper() {}
-
-    //    ForwardingProxyHandler(const ProxyTraps& aTraps, const void* aExtra)
-    //: js::BaseProxyHandler(&HandlerFamily), mTraps(aTraps), mExtra(aExtra) {}
+     CrossOriginWrapper(): js::CrossCompartmentSecurityWrapper(0) {}
 
      bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
                                        JS::HandleId id,
