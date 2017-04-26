@@ -429,6 +429,53 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
 
 };
 
+//TODO DOM SecurityError call (https://dxr.mozilla.org/mozilla-central/source/js/xpconnect/wrappers/AccessCheck.cpp?q=%2Bfunction%3A%22xpc%3A%3AAccessCheck%3A%3AisCrossOriginAccessPermitted%28JSContext+%2A%2C+JS%3A%3AHandleObject%2C+JS%3A%3AHandleId%2C+js%3A%3AWrapper%3A%3AAction%29%22&redirect_type=single#291)
+//
+
+// Hardcoded policy for cross origin property access. See the HTML5 Spec.
+static bool
+IsPermitted(JSFlatString* prop, bool set)
+{
+    return true;
+}
+
+typedef uint32_t Action;
+enum {
+    NONE      = 0x00,
+    GET       = 0x01,
+    SET       = 0x02,
+    CALL      = 0x04,
+    ENUMERATE = 0x08,
+    GET_PROPERTY_DESCRIPTOR = 0x10
+};
+
+bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, Action act) {
+  if (act == CALL)
+        return false;
+
+    if (act == ENUMERATE)
+        return true;
+
+    // For the case of getting a property descriptor, we allow if either GET or SET
+    // is allowed, and rely on FilteringWrapper to filter out any disallowed accessors.
+    if (act == GET_PROPERTY_DESCRIPTOR) {
+        return isCrossOriginAccessPermitted(cx, wrapper, id, GET) ||
+               isCrossOriginAccessPermitted(cx, wrapper, id, SET);
+    }
+
+    JS::RootedObject obj(cx, js::UncheckedUnwrap(wrapper, /*stopAtWindowProxy = */ false));
+    if (JSID_IS_STRING(id)) {
+      if (IsPermitted(JSID_TO_FLAT_STRING(id), act == SET))
+        return true;
+    }
+    // TODO XOW type
+
+    if (act != GET) 
+      return false;
+
+    return false;
+}
+
 class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
   //JS::HandleObject xow_obj;
   //TODO store the object?
