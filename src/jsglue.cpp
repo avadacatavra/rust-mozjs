@@ -360,6 +360,15 @@ class RustJSPrincipal : public JSPrincipals
     }
 };
 
+class OpaqueWrapper: public js::OpaqueCrossCompartmentWrapper {
+
+  public:
+    OpaqueWrapper()
+    : js::OpaqueCrossCompartmentWrapper(){}
+
+    virtual
+}
+
 class CrossOriginWrapper: public js::CrossCompartmentSecurityWrapper {
     ProxyTraps mTraps;
 
@@ -603,7 +612,7 @@ GetSecurityWrapper()
 const void*
 GetOpaqueWrapper()
 {
-  return &js::OpaqueCrossCompartmentWrapper::singleton;
+  return new OpaqueWrapper();
 }
 
 const void*

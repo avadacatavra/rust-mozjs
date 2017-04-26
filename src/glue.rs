@@ -212,6 +212,8 @@ extern "C" {
      -> *const ::libc::c_void;
     pub fn CreateCrossOriginWrapper(aTraps: *const ProxyTraps)
      -> *const ::libc::c_void;
+    pub fn GetOpaqueWrapper()
+     -> *const ::libc::c_void;
     pub fn CreateRustJSPrincipal(origin: *const ::libc::c_void,
                                   destroy: Option<unsafe fn
                                                   (principal: *mut JSPrincipals)>,
