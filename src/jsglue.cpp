@@ -360,76 +360,114 @@ class RustJSPrincipal : public JSPrincipals
     }
 };
 
-class OpaqueWrapper: public js::OpaqueCrossCompartmentWrapper {
+class OpaqueWrapper {
 
   public:
-    OpaqueWrapper()
-    : js::OpaqueCrossCompartmentWrapper(){}
+    OpaqueWrapper(){}
 
-    virtual
-}
-
-class CrossOriginWrapper: public js::CrossCompartmentSecurityWrapper {
-    ProxyTraps mTraps;
-
-  public:
-    CrossOriginWrapper(const ProxyTraps& traps)
-    : js::CrossCompartmentSecurityWrapper(0), mTraps(traps) {
-    }
-
-    //TODO should probably defer to an opaque wrapper
-    DEFER_TO_TRAP_OR_BASE_CLASS(js::CrossCompartmentSecurityWrapper)
-
-    virtual bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
+     bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
                                        JS::HandleId id,
-                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc)
     {
-        return mTraps.getPropertyDescriptor
-               ? mTraps.getOwnPropertyDescriptor(cx, proxy, id, desc)
-               : js::CrossCompartmentSecurityWrapper::getOwnPropertyDescriptor(cx, proxy, id, desc);
+      desc.value().setUndefined();
+      return false;
     }
 
-    virtual bool getPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
+     bool getPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
                                        JS::HandleId id,
-                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc)
     {
-        return mTraps.getPropertyDescriptor
-               ? mTraps.getPropertyDescriptor(cx, proxy, id, desc)
-               : js::CrossCompartmentSecurityWrapper::getPropertyDescriptor(cx, proxy, id, desc);
+      desc.value().setUndefined();
+      return false;
     }
 
-    virtual bool defineProperty(JSContext *cx,
+     bool defineProperty(JSContext *cx,
                                 JS::HandleObject proxy, JS::HandleId id,
                                 JS::Handle<JS::PropertyDescriptor> desc,
-                                JS::ObjectOpResult &result) const override
+                                JS::ObjectOpResult &result)
     {
-        return mTraps.defineProperty
-               ? mTraps.defineProperty(cx, proxy, id, desc, result)
-               : js::CrossCompartmentSecurityWrapper::defineProperty(cx, proxy, id, desc, result);
+      return false;
     }
 
-    virtual bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
-                         JS::ObjectOpResult &result) const override
+     bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
+                         JS::ObjectOpResult &result)
     {
-        return mTraps.delete_
-               ? mTraps.delete_(cx, proxy, id, result)
-               : js::CrossCompartmentSecurityWrapper::delete_(cx, proxy, id, result);
+      return false;
     }
 
-    virtual bool preventExtensions(JSContext *cx, JS::HandleObject proxy,
-                                   JS::ObjectOpResult &result) const override
+     bool enter(JSContext* cx, JS::Handle<JSObject*> wrapper, JS::Handle<jsid> id,
+                       js::Wrapper::Action act, bool mayThrow, bool* bp)
     {
-        return mTraps.preventExtensions
-               ? mTraps.preventExtensions(cx, proxy, result)
-               : js::CrossCompartmentSecurityWrapper::preventExtensions(cx, proxy, result);
+      return false;
     }
 
-    virtual bool isExtensible(JSContext *cx, JS::HandleObject proxy,
-                              bool *succeeded) const override
+     bool ownPropertyKeys(JSContext* cx, JS::Handle<JSObject*> wrapper,
+                                 JS::AutoIdVector& props)
     {
-        return mTraps.isExtensible
-               ? mTraps.isExtensible(cx, proxy, succeeded)
-               : js::CrossCompartmentSecurityWrapper::isExtensible(cx, proxy, succeeded);
+      return false;
+    }
+
+     bool getOwnEnumerablePropertyKeys(JSContext* cx, JS::Handle<JSObject*> wrapper,
+                                              JS::AutoIdVector& props)
+    {
+      return false;
+    }
+     bool enumerate(JSContext* cx, JS::Handle<JSObject*> wrapper,
+                           JS::MutableHandle<JSObject*> objp)
+    {
+      //return js::BaseProxyHandler::enumerate(cx, wrapper, objp);
+      return false;
+    }
+
+     bool getPrototype(JSContext* cx, JS::HandleObject wrapper,
+                              JS::MutableHandleObject protop)
+    {
+      // Filtering wrappers do not allow access to the prototype.
+      protop.set(nullptr);
+      return true;
+    }
+
+};
+
+class CrossOriginWrapper {
+  //JS::HandleObject xow_obj;
+  //TODO store the object?
+
+  public:
+    //CrossOriginWrapper(const JS::HandleObject& obj) { xow_obj = obj ;}
+     //{ xow_obj(obj) }
+     //A(int x_) { x = x_; }
+     CrossOriginWrapper() {}
+
+    //    ForwardingProxyHandler(const ProxyTraps& aTraps, const void* aExtra)
+    //: js::BaseProxyHandler(&HandlerFamily), mTraps(aTraps), mExtra(aExtra) {}
+
+     bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
+                                       JS::HandleId id,
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc)
+    {
+      return false;
+    }
+
+     bool getPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
+                                       JS::HandleId id,
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc)
+    {
+      return false;
+    }
+
+     bool defineProperty(JSContext *cx,
+                                JS::HandleObject proxy, JS::HandleId id,
+                                JS::Handle<JS::PropertyDescriptor> desc,
+                                JS::ObjectOpResult &result)
+    {
+      return false;
+    }
+
+     bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
+                         JS::ObjectOpResult &result)
+    {
+      return false;
     }
 };
 
@@ -445,7 +483,7 @@ class ForwardingProxyHandler : public js::BaseProxyHandler
         return mExtra;
     }
 
-    virtual bool finalizeInBackground(JS::Value priv) const override
+    virtual bool finalizeInBackground(JS::Value priv)
     {
         return false;
     }
@@ -616,9 +654,9 @@ GetOpaqueWrapper()
 }
 
 const void*
-CreateCrossOriginWrapper(const ProxyTraps* aTraps)
+CreateCrossOriginWrapper(const JS::HandleObject* obj)
 {
-  return new CrossOriginWrapper(*aTraps);
+  return new CrossOriginWrapper();//*obj);
 }
 
 JS::ReadOnlyCompileOptions*
