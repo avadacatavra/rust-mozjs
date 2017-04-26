@@ -601,6 +601,12 @@ GetSecurityWrapper()
 }
 
 const void*
+GetOpaqueWrapper()
+{
+  return &js::OpaqueCrossCompartmentWrapper::singleton;
+}
+
+const void*
 CreateCrossOriginWrapper(const ProxyTraps* aTraps)
 {
   return new CrossOriginWrapper(*aTraps);
