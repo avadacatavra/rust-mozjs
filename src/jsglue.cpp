@@ -468,7 +468,7 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
       if (IsPermitted(JSID_TO_FLAT_STRING(id), act == SET))
         return true;
     }
-    // TODO XOW type
+    // TODO XOW type -- currently defined in utils.rs
 
     if (act != GET) 
       return false;
@@ -476,27 +476,102 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
     return false;
 }
 
-class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
-  //JS::HandleObject xow_obj;
-  //TODO store the object?
+static JS::SymbolCode sCrossOriginWhitelistedSymbolCodes[] = {
+    JS::SymbolCode::toStringTag,
+    JS::SymbolCode::hasInstance,
+    JS::SymbolCode::isConcatSpreadable
+};
 
+bool
+IsCrossOriginWhitelistedSymbol(JSContext* cx, JS::HandleId id)
+{
+    if (!JSID_IS_SYMBOL(id)) {
+        return false;
+    }
+
+    JS::Symbol* symbol = JSID_TO_SYMBOL(id);
+    for (auto code : sCrossOriginWhitelistedSymbolCodes) {
+        if (symbol == JS::GetWellKnownSymbol(cx, code)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
+  //i guess we can store the type in here? since it's computed in utils.rs
+  
   public:
      CrossOriginWrapper(): js::CrossCompartmentSecurityWrapper(0) {}
-
-     bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
-                                       JS::HandleId id,
-                                       JS::MutableHandle<JS::PropertyDescriptor> desc)
-    {
-      return false;
-    }
 
      bool getPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
                                        JS::HandleId id,
                                        JS::MutableHandle<JS::PropertyDescriptor> desc)
     {
-      return false;
+      if (!SecurityXrayDOM::getPropertyDescriptor(cx, wrapper, id, desc))
+        return false;
+      if (desc.object()) {
+        // Cross-origin DOM objects do not have symbol-named properties apart
+        // from the ones we add ourselves here.
+        MOZ_ASSERT(!JSID_IS_SYMBOL(id),
+                   "What's this symbol-named property that appeared on a "
+                   "Window or Location instance?");
+
+        // All properties on cross-origin DOM objects are |own|.
+        desc.object().set(wrapper);
+
+        // All properties on cross-origin DOM objects are non-enumerable and
+        // "configurable". Any value attributes are read-only.
+        desc.attributesRef() &= ~JSPROP_ENUMERATE;
+        desc.attributesRef() &= ~JSPROP_PERMANENT;
+        if (!desc.getter() && !desc.setter())
+            desc.attributesRef() |= JSPROP_READONLY;
+      } else if (IsCrossOriginWhitelistedSymbol(cx, id)) {
+        // Spec says to return PropertyDescriptor {
+        //   [[Value]]: undefined, [[Writable]]: false, [[Enumerable]]: false,
+        //   [[Configurable]]: true
+        // }.
+        //
+        desc.setDataDescriptor(JS::UndefinedHandleValue, JSPROP_READONLY);
+        desc.object().set(wrapper);
+      }
+
+      return true;
+
     }
 
+    bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, AutoIdVector& props)
+    {
+      // All properties on cross-origin objects are supposed |own|, despite what
+      // the underlying native object may report. Override the inherited trap to
+      // avoid passing JSITER_OWNONLY as a flag.
+      if (!SecurityXrayDOM::getPropertyKeys(cx, wrapper, JSITER_HIDDEN, props)) {
+        return false;
+      }
+
+      if (!props.reserve(props.length() +
+                       ArrayLength(sCrossOriginWhitelistedSymbolCodes))) {
+          return false;
+      }
+
+      for (auto code : sCrossOriginWhitelistedSymbolCodes) {
+        props.infallibleAppend(SYMBOL_TO_JSID(JS::GetWellKnownSymbol(cx, code)));
+      }
+
+      return true;
+    }
+
+    bool getOwnPropertyDescriptor(JSContext* cx,
+                                                 JS::Handle<JSObject*> wrapper,
+                                                 JS::Handle<jsid> id,
+                                                 JS::MutableHandle<JS::PropertyDescriptor> desc)
+    {
+      // All properties on cross-origin DOM objects are |own|
+      return getPropertyDescriptor(cx, wrapper, id, desc);
+    }
+
+    //Not allowed
      bool defineProperty(JSContext *cx,
                                 JS::HandleObject proxy, JS::HandleId id,
                                 JS::Handle<JS::PropertyDescriptor> desc,
@@ -505,6 +580,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
       return false;
     }
 
+    // Not allowed
      bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
                          JS::ObjectOpResult &result)
     {
