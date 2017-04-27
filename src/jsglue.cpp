@@ -477,7 +477,8 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
 }
 
 static JS::SymbolCode sCrossOriginWhitelistedSymbolCodes[] = {
-    JS::SymbolCode::toStringTag,
+    //FIXME requires mozjs update
+    //JS::SymbolCode::toStringTag,
     JS::SymbolCode::hasInstance,
     JS::SymbolCode::isConcatSpreadable
 };
@@ -505,12 +506,10 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
   public:
      CrossOriginWrapper(): js::CrossCompartmentSecurityWrapper(0) {}
 
-     bool getPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
+     bool getPropertyDescriptor(JSContext *cx, JS::HandleObject wrapper,
                                        JS::HandleId id,
                                        JS::MutableHandle<JS::PropertyDescriptor> desc)
     {
-      if (!SecurityXrayDOM::getPropertyDescriptor(cx, wrapper, id, desc))
-        return false;
       if (desc.object()) {
         // Cross-origin DOM objects do not have symbol-named properties apart
         // from the ones we add ourselves here.
@@ -541,17 +540,18 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
 
     }
 
-    bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, AutoIdVector& props)
+    bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props)
     {
       // All properties on cross-origin objects are supposed |own|, despite what
       // the underlying native object may report. Override the inherited trap to
       // avoid passing JSITER_OWNONLY as a flag.
-      if (!SecurityXrayDOM::getPropertyKeys(cx, wrapper, JSITER_HIDDEN, props)) {
-        return false;
-      }
+      // No clue if we need this
+      //if (!SecurityXrayDOM::getPropertyKeys(cx, wrapper, JSITER_HIDDEN, props)) {
+      //  return false;
+      //}
 
       if (!props.reserve(props.length() +
-                       ArrayLength(sCrossOriginWhitelistedSymbolCodes))) {
+                       mozilla::ArrayLength(sCrossOriginWhitelistedSymbolCodes))) {
           return false;
       }
 
