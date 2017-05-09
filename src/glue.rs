@@ -164,11 +164,15 @@ impl ::std::default::Default for WrapperProxyHandler {
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct CrossOriginWrapper {
-    pub mTraps: ProxyTraps,
-}
+pub struct CrossOriginWrapper {}
 impl ::std::default::Default for CrossOriginWrapper {
     fn default() -> CrossOriginWrapper { unsafe { ::std::mem::zeroed() } }
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct OpaqueWrapper {}
+impl ::std::default::Default for OpaqueWrapper {
+    fn default() -> OpaqueWrapper { unsafe { ::std::mem::zeroed() } }
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -210,8 +214,6 @@ extern "C" {
      -> *const ::libc::c_void;
     pub fn CreateWrapperProxyHandler(aTraps: *const ProxyTraps)
      -> *const ::libc::c_void;
-    pub fn CreateCrossOriginWrapper(aTraps: *const ProxyTraps)
-     -> *const ::libc::c_void;
     pub fn GetOpaqueWrapper()
      -> *const ::libc::c_void;
     pub fn CreateRustJSPrincipal(origin: *const ::libc::c_void,
@@ -225,6 +227,7 @@ extern "C" {
     pub fn GetPrincipalOrigin(principal: *const JSPrincipals)
      -> *const ::libc::c_void;
     pub fn GetCrossCompartmentWrapper() -> *const ::libc::c_void;
+    pub fn CreateCrossOriginWrapper() -> *const ::libc::c_void;
     pub fn GetSecurityWrapper() -> *const ::libc::c_void;
     pub fn NewCompileOptions(aCx: *mut JSContext, aFile: *const ::libc::c_char,
                              aLine: u32) -> *mut ReadOnlyCompileOptions;

@@ -773,7 +773,7 @@ GetOpaqueWrapper()
 const void*
 CreateCrossOriginWrapper(const JS::HandleObject* obj)
 {
-  return new CrossOriginWrapper();//*obj);
+  return new CrossOriginWrapper();
 }
 
 JS::ReadOnlyCompileOptions*
