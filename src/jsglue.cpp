@@ -20,6 +20,7 @@
 #include "js/MemoryMetrics.h"
 #include "js/Principals.h"
 #include "assert.h"
+#include <iostream>
 
 struct ProxyTraps {
     bool (*enter)(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
@@ -367,7 +368,7 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
 
      bool getOwnPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
                                        JS::HandleId id,
-                                       JS::MutableHandle<JS::PropertyDescriptor> desc)
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
       desc.value().setUndefined();
       return false;
@@ -375,7 +376,7 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
 
      bool getPropertyDescriptor(JSContext *cx, JS::HandleObject proxy,
                                        JS::HandleId id,
-                                       JS::MutableHandle<JS::PropertyDescriptor> desc)
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
       desc.value().setUndefined();
       return false;
@@ -384,43 +385,37 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
      bool defineProperty(JSContext *cx,
                                 JS::HandleObject proxy, JS::HandleId id,
                                 JS::Handle<JS::PropertyDescriptor> desc,
-                                JS::ObjectOpResult &result)
+                                JS::ObjectOpResult &result) const override
     {
       return false;
     }
 
      bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
-                         JS::ObjectOpResult &result)
-    {
-      return false;
-    }
-
-     bool enter(JSContext* cx, JS::Handle<JSObject*> wrapper, JS::Handle<jsid> id,
-                       js::Wrapper::Action act, bool mayThrow, bool* bp)
+                         JS::ObjectOpResult &result) const override
     {
       return false;
     }
 
      bool ownPropertyKeys(JSContext* cx, JS::Handle<JSObject*> wrapper,
-                                 JS::AutoIdVector& props)
+                                 JS::AutoIdVector& props) const override
     {
       return false;
     }
 
      bool getOwnEnumerablePropertyKeys(JSContext* cx, JS::Handle<JSObject*> wrapper,
-                                              JS::AutoIdVector& props)
+                                              JS::AutoIdVector& props) const override
     {
       return false;
     }
      bool enumerate(JSContext* cx, JS::Handle<JSObject*> wrapper,
-                           JS::MutableHandle<JSObject*> objp)
+                           JS::MutableHandle<JSObject*> objp) const override
     {
       //return js::BaseProxyHandler::enumerate(cx, wrapper, objp);
       return false;
     }
 
      bool getPrototype(JSContext* cx, JS::HandleObject wrapper,
-                              JS::MutableHandleObject protop)
+                              JS::MutableHandleObject protop) const override
     {
       // Filtering wrappers do not allow access to the prototype.
       protop.set(nullptr);
@@ -429,8 +424,25 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
 
 };
 
+
 //TODO DOM SecurityError call (https://dxr.mozilla.org/mozilla-central/source/js/xpconnect/wrappers/AccessCheck.cpp?q=%2Bfunction%3A%22xpc%3A%3AAccessCheck%3A%3AisCrossOriginAccessPermitted%28JSContext+%2A%2C+JS%3A%3AHandleObject%2C+JS%3A%3AHandleId%2C+js%3A%3AWrapper%3A%3AAction%29%22&redirect_type=single#291)
-//
+// DOMException callback for XOWs
+
+typedef void (*throw_dom_exception_callback)(JSContext *cx);
+throw_dom_exception_callback throw_dom_exception_fn;
+void set_throw_dom_exception_callback(void (*throw_dom_exception_callback_fn)(JSContext *cx)) {
+  throw_dom_exception_fn = throw_dom_exception_callback_fn;
+}
+
+// TODO might need to deny silently sometimes 
+// http://searchfox.org/mozilla-central/source/js/xpconnect/wrappers/AccessCheck.cpp#492
+bool deny_access(JSContext* cx) {
+  std::cout << "omfg" <<std::endl;
+  throw_dom_exception_fn
+    ? throw_dom_exception_fn(cx)
+    : JS_ReportError(cx, "Access Denied");//what to do if it's not none
+    return false;
+}
 
 // Hardcoded policy for cross origin property access. See the HTML5 Spec.
 static bool
@@ -450,6 +462,7 @@ enum {
 };
 
 bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, Action act) {
+  std::cout << "is cross origin access permitted?" << act << std::endl;
   if (act == CALL)
         return false;
 
@@ -469,6 +482,7 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
         return true;
     }
     // TODO XOW type -- currently defined in utils.rs
+    // pretty sure this is why location.pathname isn't working
 
     if (act != GET) 
       return false;
@@ -508,7 +522,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
 
      bool getPropertyDescriptor(JSContext *cx, JS::HandleObject wrapper,
                                        JS::HandleId id,
-                                       JS::MutableHandle<JS::PropertyDescriptor> desc)
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
       if (desc.object()) {
         // Cross-origin DOM objects do not have symbol-named properties apart
@@ -540,7 +554,22 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
 
     }
 
-    bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props)
+    bool enter(JSContext* cx, JS::HandleObject wrapper,
+                              JS::HandleId id, js::Wrapper::Action act,
+                              bool* bp) const override
+    {
+      //TODO policy check
+      if (!isCrossOriginAccessPermitted(cx, wrapper, id, act)) {
+        std::cout << "nerp" << std::endl;
+        *bp = JS_IsExceptionPending(cx) ?
+            false : deny_access(cx);
+        return false;
+      }
+      *bp = true;
+      return true;
+    }
+
+    bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props) const override
     {
       // All properties on cross-origin objects are supposed |own|, despite what
       // the underlying native object may report. Override the inherited trap to
@@ -565,7 +594,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
     bool getOwnPropertyDescriptor(JSContext* cx,
                                                  JS::Handle<JSObject*> wrapper,
                                                  JS::Handle<jsid> id,
-                                                 JS::MutableHandle<JS::PropertyDescriptor> desc)
+                                                 JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
       // All properties on cross-origin DOM objects are |own|
       return getPropertyDescriptor(cx, wrapper, id, desc);
@@ -575,14 +604,14 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
      bool defineProperty(JSContext *cx,
                                 JS::HandleObject proxy, JS::HandleId id,
                                 JS::Handle<JS::PropertyDescriptor> desc,
-                                JS::ObjectOpResult &result)
+                                JS::ObjectOpResult &result) const override
     {
       return false;
     }
 
     // Not allowed
      bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
-                         JS::ObjectOpResult &result)
+                         JS::ObjectOpResult &result) const override
     {
       return false;
     }
@@ -662,6 +691,11 @@ class ForwardingProxyHandler : public js::BaseProxyHandler
 };
 
 extern "C" {
+
+void
+SetThrowDOMExceptionCallback(void (*throw_dom_exception_callback)(JSContext* cx)) {
+  set_throw_dom_exception_callback(throw_dom_exception_callback);
+}
 
 JSPrincipals*
 CreateRustJSPrincipal(const void* origin,
