@@ -424,32 +424,33 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
 
 };
 
-
-//TODO DOM SecurityError call (https://dxr.mozilla.org/mozilla-central/source/js/xpconnect/wrappers/AccessCheck.cpp?q=%2Bfunction%3A%22xpc%3A%3AAccessCheck%3A%3AisCrossOriginAccessPermitted%28JSContext+%2A%2C+JS%3A%3AHandleObject%2C+JS%3A%3AHandleId%2C+js%3A%3AWrapper%3A%3AAction%29%22&redirect_type=single#291)
+// TODO make this into a struct?
 // DOMException callback for XOWs
-
 typedef void (*throw_dom_exception_callback)(JSContext *cx);
 throw_dom_exception_callback throw_dom_exception_fn;
 void set_throw_dom_exception_callback(void (*throw_dom_exception_callback_fn)(JSContext *cx)) {
   throw_dom_exception_fn = throw_dom_exception_callback_fn;
 }
+typedef bool (*is_frame_id_callback)(JSContext* cx, JSObject* obj, jsid idArg);
+is_frame_id_callback is_frame_id_fn;
+static void set_is_frame_id_callback(bool (*is_frame_id_callback_fn)(JSContext* cx, JSObject* obj, jsid idArg)) {
+  is_frame_id_fn = is_frame_id_callback_fn;
+}
+
+static bool IsFrameId(JSContext* cx, JSObject* obj, jsid idArg) {
+  return is_frame_id_fn(cx, obj, idArg);
+}
 
 // TODO might need to deny silently sometimes 
 // http://searchfox.org/mozilla-central/source/js/xpconnect/wrappers/AccessCheck.cpp#492
 bool deny_access(JSContext* cx) {
-  std::cout << "omfg" <<std::endl;
+  std::cout << "deny_access" <<std::endl;
   throw_dom_exception_fn
     ? throw_dom_exception_fn(cx)
     : JS_ReportError(cx, "Access Denied");//what to do if it's not none
     return false;
 }
 
-// Hardcoded policy for cross origin property access. See the HTML5 Spec.
-static bool
-IsPermitted(JSFlatString* prop, bool set)
-{
-    return true;
-}
 
 typedef uint32_t Action;
 enum {
@@ -461,33 +462,136 @@ enum {
     GET_PROPERTY_DESCRIPTOR = 0x10
 };
 
-bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, Action act) {
-  std::cout << "is cross origin access permitted?" << act << std::endl;
-  if (act == CALL)
-        return false;
+enum CrossOriginObjectType {
+    CrossOriginWindow,
+    CrossOriginLocation,
+    CrossOriginOpaque
+};
 
-    if (act == ENUMERATE)
-        return true;
-
-    // For the case of getting a property descriptor, we allow if either GET or SET
-    // is allowed, and rely on FilteringWrapper to filter out any disallowed accessors.
-    if (act == GET_PROPERTY_DESCRIPTOR) {
-        return isCrossOriginAccessPermitted(cx, wrapper, id, GET) ||
-               isCrossOriginAccessPermitted(cx, wrapper, id, SET);
+// TODO make this less awful?
+  inline bool IsPermittedWindow(JSFlatString* prop, char16_t propFirstChar, bool set)
+  {
+    switch (propFirstChar) {
+      case 'b': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "blur")) {
+          return true;
+        }
+        break;
+      }
+      case 'c': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "close")) {
+          return true;
+        }
+        if (!set && JS_FlatStringEqualsAscii(prop, "closed")) {
+          return true;
+        }
+        break;
+      }
+      case 'f': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "focus")) {
+          return true;
+        }
+        if (!set && JS_FlatStringEqualsAscii(prop, "frames")) {
+          return true;
+        }
+        break;
+      }
+      case 'l': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "length")) {
+          return true;
+        }
+        if (JS_FlatStringEqualsAscii(prop, "location")) {
+          return true;
+        }
+        break;
+      }
+      case 'o': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "opener")) {
+          return true;
+        }
+        break;
+      }
+      case 'p': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "parent")) {
+          return true;
+        }
+        if (!set && JS_FlatStringEqualsAscii(prop, "postMessage")) {
+          return true;
+        }
+        break;
+      }
+      case 's': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "self")) {
+          return true;
+        }
+        break;
+      }
+      case 't': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "top")) {
+          return true;
+        }
+        break;
+      }
+      case 'w': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "window")) {
+          return true;
+        }
+        break;
+      }
     }
-
-    JS::RootedObject obj(cx, js::UncheckedUnwrap(wrapper, /*stopAtWindowProxy = */ false));
-    if (JSID_IS_STRING(id)) {
-      if (IsPermitted(JSID_TO_FLAT_STRING(id), act == SET))
-        return true;
-    }
-    // TODO XOW type -- currently defined in utils.rs
-    // pretty sure this is why location.pathname isn't working
-
-    if (act != GET) 
-      return false;
 
     return false;
+  }
+
+  inline bool IsPermittedLocation(JSFlatString* prop, char16_t propFirstChar, bool set)
+  {
+    switch (propFirstChar) {
+      case 'h': {
+        if (set && JS_FlatStringEqualsAscii(prop, "href")) {
+          return true;
+        }
+        break;
+      }
+      case 'r': {
+        if (!set && JS_FlatStringEqualsAscii(prop, "replace")) {
+          return true;
+        }
+        break;
+      }
+    }
+
+    return false;
+  }
+
+// Hardcoded policy for cross origin property access. See the HTML5 Spec.
+static bool
+IsPermitted(CrossOriginObjectType type, JSFlatString* prop, bool set)
+{
+        size_t propLength = JS_GetStringLength(JS_FORGET_STRING_FLATNESS(prop));
+    if (!propLength)
+        return false;
+
+    char16_t propChar0 = JS_GetFlatStringCharAt(prop, 0);
+    if (type == CrossOriginLocation)
+        return IsPermittedLocation(prop, propChar0, set);
+    if (type == CrossOriginWindow)
+        return IsPermittedWindow(prop, propChar0, set);
+
+    return false;
+}
+
+CrossOriginObjectType
+IdentifyCrossOriginObject(JSObject* obj)
+{
+    obj = js::UncheckedUnwrap(obj, /* stopAtWindowProxy = */ false);
+    const js::Class* clasp = js::GetObjectClass(obj);
+
+    if (clasp->name[0] == 'L' && !strcmp(clasp->name, "Location"))
+        return CrossOriginLocation;
+    if (clasp->name[0] == 'W' && !strcmp(clasp->name, "Window"))
+        return CrossOriginWindow;
+
+    return CrossOriginOpaque;
 }
 
 static JS::SymbolCode sCrossOriginWhitelistedSymbolCodes[] = {
@@ -514,16 +618,58 @@ IsCrossOriginWhitelistedSymbol(JSContext* cx, JS::HandleId id)
     return false;
 }
 
+bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, Action act) {
+  if (act == CALL)
+        return false;
+
+    if (act == ENUMERATE)
+        return true;
+
+    // For the case of getting a property descriptor, we allow if either GET or SET
+    // is allowed, and rely on FilteringWrapper to filter out any disallowed accessors.
+    if (act == GET_PROPERTY_DESCRIPTOR) {
+        return isCrossOriginAccessPermitted(cx, wrapper, id, GET) ||
+               isCrossOriginAccessPermitted(cx, wrapper, id, SET);
+    }
+
+    // TODO XOW type -- currently defined in utils.rs
+    JS::RootedObject obj(cx, js::UncheckedUnwrap(wrapper, /* stopAtWindowProxy = */ false));
+    CrossOriginObjectType type = IdentifyCrossOriginObject(obj);
+    if (JSID_IS_STRING(id)) {
+        if (IsPermitted(type, JSID_TO_FLAT_STRING(id), act == SET))
+            return true;
+    } else if (type != CrossOriginOpaque &&
+               IsCrossOriginWhitelistedSymbol(cx, id)) {
+        // We always allow access to @@toStringTag, @@hasInstance, and
+        // @@isConcatSpreadable.  But then we nerf them to be a value descriptor
+        // with value undefined in CrossOriginXrayWrapper.
+        return true;
+    }
+
+    if (act != GET) 
+      return false;
+
+    // Check for frame IDs. If we're resolving named frames, make sure to only
+    // resolve ones that don't shadow native properties. See bug 860494.
+    if (type == CrossOriginWindow) {
+      std::cout << "calling is frame id" << std::endl;
+        return IsFrameId(cx, obj, id);
+    }
+
+    return false;
+}
+
 class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
-  //i guess we can store the type in here? since it's computed in utils.rs
   
   public:
-     CrossOriginWrapper(): js::CrossCompartmentSecurityWrapper(0) {}
+     CrossOriginWrapper(): 
+      js::CrossCompartmentSecurityWrapper(0) {}
 
      bool getPropertyDescriptor(JSContext *cx, JS::HandleObject wrapper,
                                        JS::HandleId id,
                                        JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
+      std::cout << "get property" <<std::endl;
       if (desc.object()) {
         // Cross-origin DOM objects do not have symbol-named properties apart
         // from the ones we add ourselves here.
@@ -559,8 +705,8 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
                               bool* bp) const override
     {
       //TODO policy check
+      std::cout << "enter" <<std::endl;
       if (!isCrossOriginAccessPermitted(cx, wrapper, id, act)) {
-        std::cout << "nerp" << std::endl;
         *bp = JS_IsExceptionPending(cx) ?
             false : deny_access(cx);
         return false;
@@ -597,6 +743,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
                                                  JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
       // All properties on cross-origin DOM objects are |own|
+      std::cout << "get own property descriptor" <<std::endl;
       return getPropertyDescriptor(cx, wrapper, id, desc);
     }
 
@@ -695,6 +842,11 @@ extern "C" {
 void
 SetThrowDOMExceptionCallback(void (*throw_dom_exception_callback)(JSContext* cx)) {
   set_throw_dom_exception_callback(throw_dom_exception_callback);
+}
+
+void
+SetIsFrameIdCallback(bool (*is_frame_id_callback)(JSContext* cx, JSObject* obj, jsid idArg)) {
+  set_is_frame_id_callback(is_frame_id_callback);
 }
 
 JSPrincipals*

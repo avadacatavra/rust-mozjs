@@ -184,11 +184,13 @@ impl ::std::default::Default for ForwardingProxyHandler {
     fn default() -> ForwardingProxyHandler { unsafe { ::std::mem::zeroed() } }
 }
 
-
-
 extern "C" {
     pub fn SetThrowDOMExceptionCallback(pFun: ::std::option::Option<unsafe extern "C" fn 
                                                                     (cx: *mut JSContext)>);
+    pub fn SetIsFrameIdCallback(pfun: ::std::option::Option<unsafe extern "C" fn 
+                                                            (cx: *mut JSContext,
+                                                             obj: *mut JSObject,
+                                                             idArg: jsid)-> bool>);
     pub fn InvokeGetOwnPropertyDescriptor(handler: *const ::libc::c_void,
                                           cx: *mut JSContext,
                                           proxy: HandleObject, id: HandleId,
