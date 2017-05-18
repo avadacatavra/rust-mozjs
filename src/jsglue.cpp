@@ -424,8 +424,7 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
 
 };
 
-// TODO make this into a struct?
-// DOMException callback for XOWs
+
 typedef void (*throw_dom_exception_callback)(JSContext *cx);
 throw_dom_exception_callback throw_dom_exception_fn;
 void set_throw_dom_exception_callback(void (*throw_dom_exception_callback_fn)(JSContext *cx)) {
@@ -441,18 +440,16 @@ static bool IsFrameId(JSContext* cx, JSObject* obj, jsid idArg) {
   return is_frame_id_fn(cx, obj, idArg);
 }
 
-// TODO might need to deny silently sometimes 
-// http://searchfox.org/mozilla-central/source/js/xpconnect/wrappers/AccessCheck.cpp#492
 bool deny_access(JSContext* cx) {
   std::cout << "deny_access" <<std::endl;
   throw_dom_exception_fn
     ? throw_dom_exception_fn(cx)
-    : JS_ReportError(cx, "Access Denied");//what to do if it's not none
+    : JS_ReportError(cx, "Access Denied");
     return false;
 }
 
 
-typedef uint32_t Action;
+/*typedef uint32_t Action;
 enum {
     NONE      = 0x00,
     GET       = 0x01,
@@ -460,7 +457,7 @@ enum {
     CALL      = 0x04,
     ENUMERATE = 0x08,
     GET_PROPERTY_DESCRIPTOR = 0x10
-};
+};*/
 
 enum CrossOriginObjectType {
     CrossOriginWindow,
@@ -618,25 +615,26 @@ IsCrossOriginWhitelistedSymbol(JSContext* cx, JS::HandleId id)
     return false;
 }
 
-bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, Action act) {
-  if (act == CALL)
+bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, js::BaseProxyHandler::Action act) {
+  std::cout << act << std::endl;
+  if (act == js::BaseProxyHandler::CALL)
         return false;
 
-    if (act == ENUMERATE)
+    if (act == js::BaseProxyHandler::ENUMERATE)
         return true;
 
     // For the case of getting a property descriptor, we allow if either GET or SET
     // is allowed, and rely on FilteringWrapper to filter out any disallowed accessors.
-    if (act == GET_PROPERTY_DESCRIPTOR) {
-        return isCrossOriginAccessPermitted(cx, wrapper, id, GET) ||
-               isCrossOriginAccessPermitted(cx, wrapper, id, SET);
+    if (act == js::BaseProxyHandler::GET_PROPERTY_DESCRIPTOR) {
+        return isCrossOriginAccessPermitted(cx, wrapper, id, js::BaseProxyHandler::GET) ||
+               isCrossOriginAccessPermitted(cx, wrapper, id, js::BaseProxyHandler::SET);
     }
 
     // TODO XOW type -- currently defined in utils.rs
     JS::RootedObject obj(cx, js::UncheckedUnwrap(wrapper, /* stopAtWindowProxy = */ false));
     CrossOriginObjectType type = IdentifyCrossOriginObject(obj);
     if (JSID_IS_STRING(id)) {
-        if (IsPermitted(type, JSID_TO_FLAT_STRING(id), act == SET))
+        if (IsPermitted(type, JSID_TO_FLAT_STRING(id), act == js::BaseProxyHandler::SET))
             return true;
     } else if (type != CrossOriginOpaque &&
                IsCrossOriginWhitelistedSymbol(cx, id)) {
@@ -646,7 +644,7 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
         return true;
     }
 
-    if (act != GET) 
+    if (act != js::BaseProxyHandler::GET) 
       return false;
 
     // Check for frame IDs. If we're resolving named frames, make sure to only
@@ -659,6 +657,22 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
     return false;
 }
 
+//FIXME figure out maythrow
+struct CrossOriginPolicy {
+  static bool check(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, js::BaseProxyHandler::Action act) {
+    return isCrossOriginAccessPermitted(cx, wrapper, id, act);
+  }
+
+  static bool deny(JSContext* cx, js::BaseProxyHandler::Action act, JS::HandleId id) {//, bool mayThrow) {
+    //fail silently
+    if (act == js::BaseProxyHandler::ENUMERATE)
+      return true;
+    //if (mayThrow)
+    deny_access(cx);
+    return false;
+  }
+};
+
 class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
   
   public:
@@ -669,46 +683,48 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
                                        JS::HandleId id,
                                        JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
-      std::cout << "get property" <<std::endl;
-      if (desc.object()) {
-        // Cross-origin DOM objects do not have symbol-named properties apart
-        // from the ones we add ourselves here.
-        MOZ_ASSERT(!JSID_IS_SYMBOL(id),
-                   "What's this symbol-named property that appeared on a "
-                   "Window or Location instance?");
+      assertEnteredPolicy(cx, wrapper, id, js::BaseProxyHandler::GET | js::BaseProxyHandler::SET |
+                                           js::BaseProxyHandler::GET_PROPERTY_DESCRIPTOR);
 
-        // All properties on cross-origin DOM objects are |own|.
-        desc.object().set(wrapper);
+      if (!js::CrossCompartmentSecurityWrapper::getPropertyDescriptor(cx, wrapper, id, desc))
+        return false;
 
-        // All properties on cross-origin DOM objects are non-enumerable and
-        // "configurable". Any value attributes are read-only.
-        desc.attributesRef() &= ~JSPROP_ENUMERATE;
-        desc.attributesRef() &= ~JSPROP_PERMANENT;
-        if (!desc.getter() && !desc.setter())
-            desc.attributesRef() |= JSPROP_READONLY;
-      } else if (IsCrossOriginWhitelistedSymbol(cx, id)) {
-        // Spec says to return PropertyDescriptor {
-        //   [[Value]]: undefined, [[Writable]]: false, [[Enumerable]]: false,
-        //   [[Configurable]]: true
-        // }.
-        //
-        desc.setDataDescriptor(JS::UndefinedHandleValue, JSPROP_READONLY);
-        desc.object().set(wrapper);
-      }
+      bool getAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::GET);
+      if (JS_IsExceptionPending(cx))
+        return false;
+      bool setAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::SET);
+      if (JS_IsExceptionPending(cx))
+        return false;
 
-      return true;
+      if (!(getAllowed || setAllowed))
+        return false;
+
+      if (!desc.hasGetterOrSetter()) {
+        // Handle value properties.
+        if (!getAllowed)
+            desc.value().setUndefined();
+    } else {
+        // Handle accessor properties.
+        //MOZ_ASSERT(desc.value().isUndefined());
+        if (!getAllowed)
+            desc.setGetter(nullptr);
+        if (!setAllowed)
+            desc.setSetter(nullptr);
+    }
+
+    return true;
 
     }
 
     bool enter(JSContext* cx, JS::HandleObject wrapper,
-                              JS::HandleId id, js::Wrapper::Action act,
+                              JS::HandleId id, BaseProxyHandler::Action act,
                               bool* bp) const override
     {
       //TODO policy check
       std::cout << "enter" <<std::endl;
-      if (!isCrossOriginAccessPermitted(cx, wrapper, id, act)) {
+      if (!CrossOriginPolicy::check(cx, wrapper, id, act)) {
         *bp = JS_IsExceptionPending(cx) ?
-            false : deny_access(cx);
+            false : CrossOriginPolicy::deny(cx, act, id);//, mayThrow);
         return false;
       }
       *bp = true;
