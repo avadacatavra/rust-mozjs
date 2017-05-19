@@ -822,15 +822,57 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
                                 JS::Handle<JS::PropertyDescriptor> desc,
                                 JS::ObjectOpResult &result) const override
     {
-      return deny_access(cx);
+      return CrossOriginPolicy::deny();
     }
 
     // Not allowed
      bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
                          JS::ObjectOpResult &result) const override
     {
-      return deny_access(cx); //?
+      return CrossOriginPolicy::deny(); 
     }
+};
+
+class CrossOriginXrayWrapper : public ?? 
+{
+  bool
+  getPropertyDescriptor(JSContext *cx, JS::HandleObject wrapper,
+                        JS::HandleId id,
+                        JS::MutableHandle<JS::PropertyDescriptor> desc) const
+  {
+
+  }
+  
+  bool 
+  getOwnPropertyDescriptor(JSContext* cx,
+                           JS::Handle<JSObject*> wrapper,
+                           JS::Handle<jsid> id,
+                           JS::MutableHandle<JS::PropertyDescriptor> desc) const
+  {
+
+  }
+
+  bool
+  ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props) const
+  {
+
+  }
+
+  bool
+  defineProperty(JSContext *cx,
+                 JS::HandleObject proxy, JS::HandleId id,
+                 JS::Handle<JS::PropertyDescriptor> desc,
+                 JS::ObjectOpResult &result) const
+  {
+    return CrossOriginPolicy::deny();
+  }
+
+  bool
+  delete_(JSContext *cx, JS::HandleObject proxy, 
+          JS::HandleId id, JS::ObjectOpResult &result) const
+  {
+    return CrossOriginPolicy::deny();
+  }
 };
 
 class ForwardingProxyHandler : public js::BaseProxyHandler
