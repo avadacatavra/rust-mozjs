@@ -441,7 +441,6 @@ static bool IsFrameId(JSContext* cx, JSObject* obj, jsid idArg) {
 }
 
 bool deny_access(JSContext* cx) {
-  // std::cout << "deny_access" <<std::endl;
   throw_dom_exception_fn
     ? throw_dom_exception_fn(cx)
     : JS_ReportError(cx, "Access Denied");
@@ -564,7 +563,6 @@ enum CrossOriginObjectType {
 static bool
 IsPermitted(CrossOriginObjectType type, JSFlatString* prop, bool set)
 {
-    // std::cout << "is permitted: " << prop << std::endl;
     size_t propLength = JS_GetStringLength(JS_FORGET_STRING_FLATNESS(prop));
     if (!propLength)
         return false;
@@ -630,17 +628,19 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
                isCrossOriginAccessPermitted(cx, wrapper, id, js::BaseProxyHandler::SET);
     }
 
-    // TODO XOW type -- currently defined in utils.rs
     JS::RootedObject obj(cx, js::UncheckedUnwrap(wrapper, /* stopAtWindowProxy = */ false));
     CrossOriginObjectType type = IdentifyCrossOriginObject(obj);
     if (JSID_IS_STRING(id)) {
-        if (IsPermitted(type, JSID_TO_FLAT_STRING(id), act == js::BaseProxyHandler::SET))
+        if (IsPermitted(type, JSID_TO_FLAT_STRING(id), act == js::BaseProxyHandler::SET)){
+            std::cout << "checking permissions: true" << std::endl;
             return true;
+          }
     } else if (type != CrossOriginOpaque &&
                IsCrossOriginWhitelistedSymbol(cx, id)) {
         // We always allow access to @@toStringTag, @@hasInstance, and
         // @@isConcatSpreadable.  But then we nerf them to be a value descriptor
         // with value undefined in CrossOriginXrayWrapper.
+        std::cout << "checking permissions- true" << std::endl;
         return true;
     }
 
@@ -660,6 +660,7 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
 //FIXME figure out maythrow
 struct CrossOriginPolicy {
   static bool check(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, js::BaseProxyHandler::Action act) {
+    std::cout << isCrossOriginAccessPermitted(cx, wrapper, id, act) <<std::endl;
     return isCrossOriginAccessPermitted(cx, wrapper, id, act);
   }
 
@@ -672,10 +673,6 @@ struct CrossOriginPolicy {
     return false;
   }
 };
-
-bool xrayGetPropertyDescriptor(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, JS::Rooted<JS::PropertyDescriptor>* desc) {
-  return true;
-}
 
 class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
   
@@ -774,11 +771,49 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
       return true;
     }
 
+<<<<<<< 17ba361501d75a936810c80e17a65d4918a783d5
      bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props) const override
      {
       JS::AutoIdVector keys(cx);
 
+=======
+    //https://dxr.mozilla.org/mozilla-central/source/js/xpconnect/wrappers/XrayWrapper.cpp#2260
+    bool get(JSContext* cx, JS::HandleObject wrapper, JS::HandleValue receiver,
+             JS::HandleId id, JS::MutableHandleValue vp) const override
+    {
+        std::cout << "get" << std::endl;
+        JS::Rooted<JS::PropertyDescriptor> desc(cx);
+        if (!getPropertyDescriptor(cx, wrapper, id, &desc))
+          return false;
+        desc.assertCompleteIfFound(); //?
 
+        if (!desc.object()) {
+          vp.setUndefined();
+          return true;
+        }
+
+        if (desc.isDataDescriptor()) {
+          vp.set(desc.value());
+          return true;
+        }
+
+        if (!desc.isAccessorDescriptor())
+          return false;
+
+        JS::RootedObject getter(cx, desc.getterObject());
+
+        if (!getter) {
+          vp.setUndefined();
+          return true;
+        }
+
+        //TODO might need to do some work on second arg
+        return Call(cx, receiver, getter, JS::HandleValueArray::empty(), vp);
+
+    }
+
+    bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props) const override
+    {
       if (!keys.reserve(props.length() +
                        mozilla::ArrayLength(sCrossOriginWhitelistedSymbolCodes))) {
           return false;
@@ -798,11 +833,6 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
             CrossOriginPolicy::check(cx, wrapper, keyHandle, BaseProxyHandler::SET)) {
           props.append(key);
         }
-
-        //FIXME you're throwing an error because of SET. if you look at XrayWrapper::ownPropertyKeys
-        // they assertEnteredPolicy(... ENUMERATE)
-        // this makes the policy check fail silently instead of throwing
-
       }
       return true;
     }
