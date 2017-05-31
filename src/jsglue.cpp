@@ -673,11 +673,15 @@ struct CrossOriginPolicy {
   }
 };
 
+bool xrayGetPropertyDescriptor(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, JS::Rooted<JS::PropertyDescriptor>* desc) {
+  return true;
+}
+
 class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
   
   public:
      CrossOriginWrapper(): 
-      js::CrossCompartmentSecurityWrapper(0) {}
+      js::CrossCompartmentSecurityWrapper(HandlerFamily) {}
 
      bool getPropertyDescriptor(JSContext *cx, JS::HandleObject wrapper,
                                        JS::HandleId id,
@@ -686,7 +690,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
       assertEnteredPolicy(cx, wrapper, id, js::BaseProxyHandler::GET | js::BaseProxyHandler::SET |
                                            js::BaseProxyHandler::GET_PROPERTY_DESCRIPTOR);
 
-      if (!js::CrossCompartmentSecurityWrapper::getPropertyDescriptor(cx, wrapper, id, desc))
+      if (!js::CrossCompartmentSecurityWrapper::getPropertyDescriptor(cx, wrapper, id, desc)) // this is leading to the failed assertion
         return false;
 
       bool getAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::GET);
@@ -716,12 +720,38 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
 
     }
 
+    //need to xray through this
+    /*bool get(JSContext* cx, JS::HandleObject wrapper,
+             JS::HandleValue receiver, JS::HandleId id,
+             JS::MutableHandleValue vp) const override
+    {
+          JS::Rooted<JS::PropertyDescriptor> desc(cx);
+          //will probably need to meake a new function for this that accesses the window object
+          if (!xrayGetPropertyDescriptor(cx, wrapper, id, &desc)) // is not calling CrossOriginWrapper prop desc
+            return false;
+
+          if (!desc.object()) {
+            vp.setUndefined();
+            return true;
+          }
+
+          if (desc.isDataDescriptor()) {
+            vp.set(desc.value());
+            return true;
+          }
+
+          if (!desc.isAccessorDescriptor()) {
+            return false;
+          }
+
+          //need to deal with accessor :D
+          return false;
+    }*/
+
     bool enter(JSContext* cx, JS::HandleObject wrapper,
                               JS::HandleId id, BaseProxyHandler::Action act,
                               bool* bp) const override
     {
-      //TODO policy check
-      std::cout << "enter" <<std::endl;
       if (!CrossOriginPolicy::check(cx, wrapper, id, act)) {
         *bp = JS_IsExceptionPending(cx) ?
             false : CrossOriginPolicy::deny(cx, act, id);//, mayThrow);
@@ -1131,11 +1161,17 @@ GetProxyHandlerExtra(JSObject* obj)
     return static_cast<const ForwardingProxyHandler*>(handler)->getExtra();
 }
 
+/*
+  the handler family check is comparing two memory addresses
+  what happens if i modify it to compare the values there
+ */
 const void*
 GetProxyHandler(JSObject* obj)
 {
     const js::BaseProxyHandler* handler = js::GetProxyHandler(obj);
-    assert(handler->family() == &HandlerFamily);
+    const int * family = (int*) handler->family();
+    std::cout << *family << " ?= " << HandlerFamily << std::endl;
+    assert(*family == HandlerFamily);
     return handler;
 }
 
