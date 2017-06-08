@@ -441,7 +441,7 @@ static bool IsFrameId(JSContext* cx, JSObject* obj, jsid idArg) {
 }
 
 bool deny_access(JSContext* cx) {
-  std::cout << "deny_access" <<std::endl;
+  // std::cout << "deny_access" <<std::endl;
   throw_dom_exception_fn
     ? throw_dom_exception_fn(cx)
     : JS_ReportError(cx, "Access Denied");
@@ -564,7 +564,8 @@ enum CrossOriginObjectType {
 static bool
 IsPermitted(CrossOriginObjectType type, JSFlatString* prop, bool set)
 {
-        size_t propLength = JS_GetStringLength(JS_FORGET_STRING_FLATNESS(prop));
+    // std::cout << "is permitted: " << prop << std::endl;
+    size_t propLength = JS_GetStringLength(JS_FORGET_STRING_FLATNESS(prop));
     if (!propLength)
         return false;
 
@@ -616,7 +617,6 @@ IsCrossOriginWhitelistedSymbol(JSContext* cx, JS::HandleId id)
 }
 
 bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, js::BaseProxyHandler::Action act) {
-  std::cout << act << std::endl;
   if (act == js::BaseProxyHandler::CALL)
         return false;
 
@@ -650,7 +650,7 @@ bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject wrapper, JS::H
     // Check for frame IDs. If we're resolving named frames, make sure to only
     // resolve ones that don't shadow native properties. See bug 860494.
     if (type == CrossOriginWindow) {
-      std::cout << "calling is frame id" << std::endl;
+      // std::cout << "calling is frame id" << std::endl;
         return IsFrameId(cx, obj, id);
     }
 
@@ -748,6 +748,19 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
           return false;
     }*/
 
+    bool getPrototype(JSContext * cx, JS::HandleObject wrapper, JS::MutableHandleObject protop) const override
+    {
+      protop.set(nullptr);
+      return true;
+    }
+
+    bool setPrototype(JSContext* cx, JS::HandleObject wrapper, JS::HandleObject proto,
+                                    JS::ObjectOpResult& result) const override
+    {
+      //TODO need to do a typeerror sometimes?
+      return deny_access(cx);
+    }
+
     bool enter(JSContext* cx, JS::HandleObject wrapper,
                               JS::HandleId id, BaseProxyHandler::Action act,
                               bool* bp) const override
@@ -761,25 +774,65 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
       return true;
     }
 
-    bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props) const override
-    {
-      // All properties on cross-origin objects are supposed |own|, despite what
-      // the underlying native object may report. Override the inherited trap to
-      // avoid passing JSITER_OWNONLY as a flag.
-      // No clue if we need this
-      //if (!SecurityXrayDOM::getPropertyKeys(cx, wrapper, JSITER_HIDDEN, props)) {
-      //  return false;
-      //}
+     bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props) const override
+     {
+    //   // All properties on cross-origin objects are supposed |own|, despite what
+    //   // the underlying native object may report. Override the inherited trap to
+    //   // avoid passing JSITER_OWNONLY as a flag.
+    //   // No clue if we need this
+    //   //if (!SecurityXrayDOM::getPropertyKeys(cx, wrapper, JSITER_HIDDEN, props)) {
+    //   //  return false;
+    //   //}
+    //   //FIXME i think this is totally wrong
+    //   std::cout << "prop keys" << std::endl;
+      JS::AutoIdVector keys(cx);
 
-      if (!props.reserve(props.length() +
+
+      if (!keys.reserve(props.length() +
                        mozilla::ArrayLength(sCrossOriginWhitelistedSymbolCodes))) {
           return false;
       }
+    //   // for (auto code : sCrossOriginWhitelistedSymbolCodes) {
+    //     // props.infallibleAppend(SYMBOL_TO_JSID(JS::GetWellKnownSymbol(cx, code)));
+    //   // }
 
-      for (auto code : sCrossOriginWhitelistedSymbolCodes) {
-        props.infallibleAppend(SYMBOL_TO_JSID(JS::GetWellKnownSymbol(cx, code)));
+    //   //JS::RootedObject target(cx, wrapper->as<ProxyObject>().target());
+    //   // JS::AutoIdVector keys = CreateAutoIdVector(cx);
+      js::GetPropertyKeys(cx, wrapper, JSITER_OWNONLY, &keys);
+      size_t len = keys.length();
+      if (!props.reserve(len)){
+        return false;
       }
+      //if (!props.reserve(props.length() +
+      //                   mozilla::ArrayLength(sCrossOriginWhitelistedSymbolCodes))) {
+      //    return false;
+      //}
+      for (auto key : keys ) {
+        JS::RootedId rootedKey(cx, key);
+        JS::HandleId keyHandle = JS::HandleId(rootedKey);
+        //JS::HandleId keyHandle = JS::HandleId(key);//JS::HandleId::fromMarkedLocation(&key);
+        if (isCrossOriginAccessPermitted(cx, wrapper, keyHandle, BaseProxyHandler::GET) || 
+            isCrossOriginAccessPermitted(cx, wrapper, keyHandle, BaseProxyHandler::SET)) {
+          //std::cout << "ugh" << std::endl;
+          props.append(key);
+        }
 
+        // if (JSID_IS_STRING(key)) {
+        //   JSFlatString* flatkey = JSID_TO_FLAT_STRING(key);
+        //   JS::RootedObject obj(cx, js::UncheckedUnwrap(wrapper, /* stopAtWindowProxy = */ false));
+
+        //   CrossOriginObjectType type = IdentifyCrossOriginObject(obj);
+        //   if (IsPermitted(type, flatkey, false)) {
+        //     std::cout << "permitted: " << flatkey << std::endl;
+        //     //props.infallibleAppend(key);
+        //   }
+        //   //std::cout << flatkey << std::endl;
+        // }
+    //   //   // if (isCrossOriginAccessPermitted(cx, wrapper, keyHandle, BaseProxyHandler::GET)) {
+    //   //     //std::cout << "is permitted" << std::endl;
+    //   //     // props.append(key);
+    //   //   // }
+      }
       return true;
     }
 
@@ -789,7 +842,6 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
                                                  JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
       // All properties on cross-origin DOM objects are |own|
-      std::cout << "get own property descriptor" <<std::endl;
       return getPropertyDescriptor(cx, wrapper, id, desc);
     }
 
@@ -799,14 +851,14 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
                                 JS::Handle<JS::PropertyDescriptor> desc,
                                 JS::ObjectOpResult &result) const override
     {
-      return false;
+      return deny_access(cx);
     }
 
     // Not allowed
      bool delete_(JSContext *cx, JS::HandleObject proxy, JS::HandleId id,
                          JS::ObjectOpResult &result) const override
     {
-      return false;
+      return deny_access(cx); //?
     }
 };
 
@@ -1170,7 +1222,6 @@ GetProxyHandler(JSObject* obj)
 {
     const js::BaseProxyHandler* handler = js::GetProxyHandler(obj);
     const int * family = (int*) handler->family();
-    std::cout << *family << " ?= " << HandlerFamily << std::endl;
     assert(*family == HandlerFamily);
     return handler;
 }
