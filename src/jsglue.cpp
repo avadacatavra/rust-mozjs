@@ -776,15 +776,6 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
 
      bool ownPropertyKeys(JSContext *cx, JS::HandleObject wrapper, JS::AutoIdVector& props) const override
      {
-    //   // All properties on cross-origin objects are supposed |own|, despite what
-    //   // the underlying native object may report. Override the inherited trap to
-    //   // avoid passing JSITER_OWNONLY as a flag.
-    //   // No clue if we need this
-    //   //if (!SecurityXrayDOM::getPropertyKeys(cx, wrapper, JSITER_HIDDEN, props)) {
-    //   //  return false;
-    //   //}
-    //   //FIXME i think this is totally wrong
-    //   std::cout << "prop keys" << std::endl;
       JS::AutoIdVector keys(cx);
 
 
@@ -792,46 +783,26 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
                        mozilla::ArrayLength(sCrossOriginWhitelistedSymbolCodes))) {
           return false;
       }
-    //   // for (auto code : sCrossOriginWhitelistedSymbolCodes) {
-    //     // props.infallibleAppend(SYMBOL_TO_JSID(JS::GetWellKnownSymbol(cx, code)));
-    //   // }
 
-    //   //JS::RootedObject target(cx, wrapper->as<ProxyObject>().target());
-    //   // JS::AutoIdVector keys = CreateAutoIdVector(cx);
+      //FIXME Missing the following keys on Window:
+      // 0, 1, blur, closed, focus, length, opener
       js::GetPropertyKeys(cx, wrapper, JSITER_OWNONLY, &keys);
       size_t len = keys.length();
       if (!props.reserve(len)){
         return false;
       }
-      //if (!props.reserve(props.length() +
-      //                   mozilla::ArrayLength(sCrossOriginWhitelistedSymbolCodes))) {
-      //    return false;
-      //}
       for (auto key : keys ) {
         JS::RootedId rootedKey(cx, key);
         JS::HandleId keyHandle = JS::HandleId(rootedKey);
-        //JS::HandleId keyHandle = JS::HandleId(key);//JS::HandleId::fromMarkedLocation(&key);
-        if (isCrossOriginAccessPermitted(cx, wrapper, keyHandle, BaseProxyHandler::GET) || 
-            isCrossOriginAccessPermitted(cx, wrapper, keyHandle, BaseProxyHandler::SET)) {
-          //std::cout << "ugh" << std::endl;
+        if (CrossOriginPolicy::check(cx, wrapper, keyHandle, BaseProxyHandler::GET) || 
+            CrossOriginPolicy::check(cx, wrapper, keyHandle, BaseProxyHandler::SET)) {
           props.append(key);
         }
 
-        // if (JSID_IS_STRING(key)) {
-        //   JSFlatString* flatkey = JSID_TO_FLAT_STRING(key);
-        //   JS::RootedObject obj(cx, js::UncheckedUnwrap(wrapper, /* stopAtWindowProxy = */ false));
+        //FIXME you're throwing an error because of SET. if you look at XrayWrapper::ownPropertyKeys
+        // they assertEnteredPolicy(... ENUMERATE)
+        // this makes the policy check fail silently instead of throwing
 
-        //   CrossOriginObjectType type = IdentifyCrossOriginObject(obj);
-        //   if (IsPermitted(type, flatkey, false)) {
-        //     std::cout << "permitted: " << flatkey << std::endl;
-        //     //props.infallibleAppend(key);
-        //   }
-        //   //std::cout << flatkey << std::endl;
-        // }
-    //   //   // if (isCrossOriginAccessPermitted(cx, wrapper, keyHandle, BaseProxyHandler::GET)) {
-    //   //     //std::cout << "is permitted" << std::endl;
-    //   //     // props.append(key);
-    //   //   // }
       }
       return true;
     }
