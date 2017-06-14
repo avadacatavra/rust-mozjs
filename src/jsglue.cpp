@@ -263,7 +263,9 @@ class WrapperProxyHandler : public js::Wrapper
     ProxyTraps mTraps;
   public:
     WrapperProxyHandler(const ProxyTraps& aTraps)
-    : js::Wrapper(0), mTraps(aTraps) {}
+    : js::Wrapper(0), mTraps(aTraps) {
+      std::cout << "wph" <<std::endl;
+    }
 
     virtual bool finalizeInBackground(JS::Value priv) const override
     {
@@ -675,7 +677,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
   public:
      CrossOriginWrapper(): 
       js::CrossCompartmentSecurityWrapper(HandlerFamily) {
-        std::cout << this->hasSecurityPolicy() << std::endl;
+        std::cout << "xow" << std::endl;
       }//, /* hasPrototype */ false, /* hasSecurityPolicy = */ true) {}
       //FIXME need to set hasSecurityPolicy to true
       //or...is it already true
@@ -762,7 +764,11 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
                               JS::HandleId id, BaseProxyHandler::Action act,
                               bool* bp) const override
     {
-      std::cout << "xow enter" << std::endl;
+      //FIXME enumerate needs to return an empty iterator and this makes that happen
+      //but does this break anything else
+      if (act == BaseProxyHandler::ENUMERATE) {
+        return false;
+      }
       if (!CrossOriginPolicy::check(cx, wrapper, id, act)) {
         *bp = JS_IsExceptionPending(cx) ?
             false : CrossOriginPolicy::deny(cx, act, id);//, mayThrow);
