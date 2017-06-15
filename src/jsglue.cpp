@@ -766,7 +766,10 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
     {
       //FIXME enumerate needs to return an empty iterator and this makes that happen
       //but does this break anything else
+      BaseProxyHandler::Action temp = BaseProxyHandler::ENUMERATE;
       if (act == BaseProxyHandler::ENUMERATE) {
+        //bp is may throw! you can make this better TODO
+        // *bp = false;
         return false;
       }
       if (!CrossOriginPolicy::check(cx, wrapper, id, act)) {
