@@ -263,9 +263,7 @@ class WrapperProxyHandler : public js::Wrapper
     ProxyTraps mTraps;
   public:
     WrapperProxyHandler(const ProxyTraps& aTraps)
-    : js::Wrapper(0), mTraps(aTraps) {
-      std::cout << "wph" <<std::endl;
-    }
+    : js::Wrapper(0), mTraps(aTraps) {}
 
     virtual bool finalizeInBackground(JS::Value priv) const override
     {
@@ -676,11 +674,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
   
   public:
      CrossOriginWrapper(): 
-      js::CrossCompartmentSecurityWrapper(HandlerFamily) {
-        std::cout << "xow" << std::endl;
-      }//, /* hasPrototype */ false, /* hasSecurityPolicy = */ true) {}
-      //FIXME need to set hasSecurityPolicy to true
-      //or...is it already true
+      js::CrossCompartmentSecurityWrapper(HandlerFamily) {}
 
      bool getPropertyDescriptor(JSContext *cx, JS::HandleObject wrapper,
                                        JS::HandleId id,
@@ -689,7 +683,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
       assertEnteredPolicy(cx, wrapper, id, js::BaseProxyHandler::GET | js::BaseProxyHandler::SET |
                                            js::BaseProxyHandler::GET_PROPERTY_DESCRIPTOR);
 
-      if (!js::CrossCompartmentSecurityWrapper::getPropertyDescriptor(cx, wrapper, id, desc)) // this is leading to the failed assertion
+      if (!js::CrossCompartmentSecurityWrapper::getPropertyDescriptor(cx, wrapper, id, desc))
         return false;
 
       bool getAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::GET);
@@ -698,6 +692,60 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
       bool setAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::SET);
       if (JS_IsExceptionPending(cx))
         return false;
+
+      if (desc.object()) {
+        // Cross-origin DOM objects do not have symbol-named properties apart
+        // from the ones we add ourselves here.
+        // MOZ_ASSERT(!JSID_IS_SYMBOL(id),
+                   // "What's this symbol-named property that appeared on a "
+                   // "Window or Location instance?");
+
+        // All properties on cross-origin DOM objects are |own|.
+        desc.object().set(wrapper);
+
+        // All properties on cross-origin DOM objects are non-enumerable and
+        // "configurable". Any value attributes are read-only.
+        desc.attributesRef() &= ~JSPROP_ENUMERATE;
+        desc.attributesRef() &= ~JSPROP_PERMANENT;
+        if (!desc.getter() && !desc.setter())
+            desc.attributesRef() |= JSPROP_READONLY;
+    } else if (IsCrossOriginWhitelistedSymbol(cx, id)) {
+        // Spec says to return PropertyDescriptor {
+        //   [[Value]]: undefined, [[Writable]]: false, [[Enumerable]]: false,
+        //   [[Configurable]]: true
+        // }.
+        //
+        desc.setDataDescriptor(JS::UndefinedHandleValue, JSPROP_READONLY);
+        desc.object().set(wrapper);
+    }
+
+          if (!desc.hasGetterOrSetter()) {
+        // Handle value properties.
+        if (!getAllowed)
+            desc.value().setUndefined();
+    } else {
+        // Handle accessor properties.
+        //MOZ_ASSERT(desc.value().isUndefined());
+        if (!getAllowed)
+            desc.setGetter(nullptr);
+        if (!setAllowed)
+            desc.setSetter(nullptr);
+    }
+
+    return true;
+    /*
+
+      bool getAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::GET);
+      if (JS_IsExceptionPending(cx))
+        return false;
+      bool setAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::SET);
+      if (JS_IsExceptionPending(cx))
+        return false;
+
+      // All properties on cross-origin DOM objects are non-enumerable and
+      // "configurable". Any value attributes are read-only.
+      desc.attributesRef() &= ~JSPROP_ENUMERATE;
+      desc.attributesRef() &= ~JSPROP_PERMANENT;
 
       if (!(getAllowed || setAllowed))
         return false;
@@ -716,7 +764,7 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
     }
 
     return true;
-
+  */
     }
 
     //need to xray through this
@@ -766,10 +814,12 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
     {
       //FIXME enumerate needs to return an empty iterator and this makes that happen
       //but does this break anything else
-      BaseProxyHandler::Action temp = BaseProxyHandler::ENUMERATE;
+      // this should be handled property by the policy
+      // BaseProxyHandler::Action temp = BaseProxyHandler::ENUMERATE;
       if (act == BaseProxyHandler::ENUMERATE) {
         //bp is may throw! you can make this better TODO
-        // *bp = false;
+        //also. you must set this properly
+        *bp = 0x01;//false;
         return false;
       }
       if (!CrossOriginPolicy::check(cx, wrapper, id, act)) {
