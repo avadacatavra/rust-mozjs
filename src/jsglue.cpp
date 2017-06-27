@@ -370,6 +370,7 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
                                        JS::HandleId id,
                                        JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
+      std::cout << "opaque get own prop" << std::endl;
       desc.value().setUndefined();
       return false;
     }
@@ -378,6 +379,7 @@ class OpaqueWrapper: js::CrossCompartmentSecurityWrapper {
                                        JS::HandleId id,
                                        JS::MutableHandle<JS::PropertyDescriptor> desc) const override
     {
+      std::cout << "opaque get prop" << std::endl;
       desc.value().setUndefined();
       return false;
     }
@@ -587,6 +589,7 @@ IdentifyCrossOriginObject(JSObject* obj)
     if (clasp->name[0] == 'W' && !strcmp(clasp->name, "Window"))
         return CrossOriginWindow;
 
+    std::cout << "opaque" << std::endl;
     return CrossOriginOpaque;
 }
 
@@ -719,81 +722,98 @@ class CrossOriginWrapper: js::CrossCompartmentSecurityWrapper {
         desc.object().set(wrapper);
     }
 
-          if (!desc.hasGetterOrSetter()) {
+
+      // Error: assert_equals: property descriptor for location should have setter expected true but got false
+      // https://dxr.mozilla.org/servo/source/components/script/dom/windowproxy.rs#293-320
+     if (!desc.hasGetterOrSetter()) {
         // Handle value properties.
         if (!getAllowed)
             desc.value().setUndefined();
     } else {
         // Handle accessor properties.
         //MOZ_ASSERT(desc.value().isUndefined());
-        if (!getAllowed)
+        if (desc.value().isUndefined()){
+          if (!getAllowed)
             desc.setGetter(nullptr);
-        if (!setAllowed)
+          if (!setAllowed)
             desc.setSetter(nullptr);
+        }
     }
 
     return true;
+    }
+
     /*
+      Function attributes
+      The way gecko deals with them is http://searchfox.org/mozilla-central/source/dom/bindings/DOMJSClass.h#173
+        XrayResolveOwnProperty calls GetNativePropertyHooks
+        Passes nativeProperties.{regular, chromeOnly} onto ResolveUnforgeableProperty
+          calls XrayResolveMethod
+        Passes nativeProperties to XrayResolveProperty
+          calls hasMethods() and hasStaticMethods()
+          then gets Methods(), MethodIds(), MethodSpecs()
+          calls XrayResolveMethod
+            methods, methodids, methodspecs are all passed through
+            iterates through methods, then iterates through ids
+            there's caching going on
+            basically it creates the function object and stores it in desc.value and it caches it
 
-      bool getAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::GET);
-      if (JS_IsExceptionPending(cx))
-        return false;
-      bool setAllowed = CrossOriginPolicy::check(cx, wrapper, id, js::BaseProxyHandler::SET);
-      if (JS_IsExceptionPending(cx))
-        return false;
-
-      // All properties on cross-origin DOM objects are non-enumerable and
-      // "configurable". Any value attributes are read-only.
-      desc.attributesRef() &= ~JSPROP_ENUMERATE;
-      desc.attributesRef() &= ~JSPROP_PERMANENT;
-
-      if (!(getAllowed || setAllowed))
-        return false;
-
-      if (!desc.hasGetterOrSetter()) {
-        // Handle value properties.
-        if (!getAllowed)
-            desc.value().setUndefined();
-    } else {
-        // Handle accessor properties.
-        //MOZ_ASSERT(desc.value().isUndefined());
-        if (!getAllowed)
-            desc.setGetter(nullptr);
-        if (!setAllowed)
-            desc.setSetter(nullptr);
-    }
-
-    return true;
-  */
-    }
+     */
 
     //need to xray through this
-    /*bool get(JSContext* cx, JS::HandleObject wrapper,
+    bool get(JSContext* cx, JS::HandleObject wrapper,
              JS::HandleValue receiver, JS::HandleId id,
              JS::MutableHandleValue vp) const override
     {
+
+          std::cout << " xow get" << std::endl;
+
+
           JS::Rooted<JS::PropertyDescriptor> desc(cx);
           //will probably need to meake a new function for this that accesses the window object
-          if (!xrayGetPropertyDescriptor(cx, wrapper, id, &desc)) // is not calling CrossOriginWrapper prop desc
+          if (!getPropertyDescriptor(cx, wrapper, id, &desc)) // is not calling CrossOriginWrapper prop desc
             return false;
+
+          JS::Value val = desc.value();
+          bool callable = isCallable(&val.toObject());
+          // std::cout << callable << std::endl;
+
+          // if it's callable, shouldn't it be a function?
+          
+          if (callable == true){
+            std::cout << "callable" << std::endl;
+            
+            const NativePropertyHooks *nativePropertyHooks = GetNativePropertyHooks(cx, obj, type);
+            JSObject *funobj;
+
+
+            vp.setUndefined();
+            return true;
+          }
 
           if (!desc.object()) {
             vp.setUndefined();
+            std::cout << "undef" << std::endl;
+
             return true;
           }
 
           if (desc.isDataDescriptor()) {
             vp.set(desc.value());
+             std::cout << "data" << std::endl;
+
+            
             return true;
           }
 
           if (!desc.isAccessorDescriptor()) {
-            return false;
+            std::cout << "accessor" << std::endl;
+            return true;
           }
 
           //need to deal with accessor :D
           return false;
-    }*/
+    }
 
     bool getPrototype(JSContext * cx, JS::HandleObject wrapper, JS::MutableHandleObject protop) const override
     {
